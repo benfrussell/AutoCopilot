@@ -1,4 +1,4 @@
-# AutoCoPilot
+# AutoCopilot
 
 An onboard copilot program for automating functions and devices on your drone. 
 
@@ -34,7 +34,7 @@ var instructions = new InstructionSequence(looping=true) {
 		Conditions.OutsidePolygon(area.Polygon),
 		Actions.Log("Deactivating Servo"),
 		Actions.SetMavlinkServo(9, 1000))
-}
+};
 
 Copilot.SetInstructions(instructions);
 ```
@@ -47,14 +47,14 @@ var instructions = new InstructionGroup("ServoActivationArea") {
 	new InstructionSequence("ActivationLoop", looping=true) {
 		new Instruction(
 			Conditions.InsidePolygon(areaPolygon),
-			Actions.Log("Deactivating Servo"),
-			Actions.StopTimer("ActivationTimer"),
+			Actions.Log("Activating Servo"),
+			Actions.StartTimer("ActivationTimer"),
 			Actions.SetMavlinkServo(9, 2000)),
 
 		new Instruction(
 			Conditions.OutsidePolygon(areaPolygon),
 			Actions.Log("Deactivating Servo"),
-			Actions.StartTimer("ActivationTimer"),
+			Actions.StopTimer("ActivationTimer"),
 			Actions.SetMavlinkServo(9, 1000))
 	},
 
@@ -67,7 +67,7 @@ var instructions = new InstructionGroup("ServoActivationArea") {
 		Actions.FinishInstruction("ServoActivationArea")
 		Actions.InitiateReturnHome())
     
-  // The instruction exector will visit ActivationLoop to see if there's any update
+  	// The instruction exector will visit ActivationLoop to see if there's any update
 	// then visit TimerCompleteInstruction to see if there's any update,
 	// then loop from the start
 }
@@ -82,13 +82,13 @@ var StopServoActions = new List<CopilotAction> {
 	Actions.StopTimer("ActivationTimer"),
 	Actions.Log("Deactivating Servo"),
 	Actions.SetMavlinkServo(9, 1000) 
-}
+};
 
 var StartServoActions = new List<CopilotAction> {
 	Actions.StartTimer("ActivationTimer"),
 	Actions.Log("Activating Servo"),
 	Actions.SetMavlinkServo(9, 2000) 
-}
+};
 
 // With FromCollection we can use a lambda expression to convert a list of objects into multiple instruction sequences
 var ActivationSequence = InstructionSequence.FromCollection<ActivationArea>(ActivationAreas,
@@ -120,7 +120,6 @@ var ActivationSequence = InstructionSequence.FromCollection<ActivationArea>(Acti
 	});
 
 // We now want the very last instruction in the sequence to return the drone home
-// It doesn't need a condition - if we reached this point it's safe to go home
 ActivationSequence.AddToEnd(
 	new Instruction(
 		Actions.Log("Finished all activation area instructions. Returning home."),
@@ -136,13 +135,13 @@ var FailsafeInstructions = new InstructionGroup("Failsafes") {
 	// Without the copilot interface, we can't issue commands to the drone.
 	// But we can set a flag to stop everything when the interface comes back.
 	new Instruction("Interface Connection Lost Failsafe",
-		new List<Condition>() {Conditions.AutoMode(true), Conditions.InterfaceStatus(false), Conditions.ReturnMode(false)},
+		Conditions.AllOf(Conditions.AutoMode(true), Conditions.InterfaceStatus(false), Conditions.ReturnMode(false)),
 		Actions.SetFlag("InterfaceDropped", true),
 		Actions.Log("Copilot interface connection was lost while the drone was on autopilot.")),
 
 	// If the copilot interface comes back after being dropped, we want to call off the mission
 	new Instruction("Interface Connection Regained",
-		new List<Condition>() {Conditions.GetFlag("InterfaceDropped", true), Conditions.InterfaceStatus(true), Conditions.AutoMode(true), Conditions.ReturnMode(false)},
+		Conditions.AllOf(Conditions.GetFlag("InterfaceDropped", true), Conditions.InterfaceStatus(true), Conditions.AutoMode(true), Conditions.ReturnMode(false)),
 		StopServoActions,
 		Actions.SetFlag("InterfaceDropped", false),
 		Actions.InitiateReturnHome()),
@@ -155,16 +154,16 @@ var FailsafeInstructions = new InstructionGroup("Failsafes") {
 
 	// If the drone initiates a return home, make sure the servo stops if it wasn't already stopped
 	new Instruction("Unexpected Return Home Failsafe",
-		new List<Condition>() {Conditions.ReturnMode(true), Conditions.TimerState("ActivationTimer", true)),
+		Conditions.AllOf(Conditions.ReturnMode(true), Conditions.TimerState("ActivationTimer", true)),
 		StopServoActions,
 		Actions.Log("Drone started returning unexpectedly while on mission.")),
 
 	// If the drone stops moving for a few seconds while the servo is active, stop it
 	new Instruction("Stopped While Activated Failsafe",
-		new List<Condition>() {Conditions.StoppedTimePassed(3), Conditions.TimerState("ActivationTimer", true)),
+		Conditions.AllOf(Conditions.StoppedTimePassed(3), Conditions.TimerState("ActivationTimer", true)),
 		StopServoActions,
 		Actions.Log("Drone stopped moving while activated."))
-}
+};
 
 // Add conditions to the instruction sequence so it will only be visited while the drone is:
 // In auto-mode, not returning, and not stopped
@@ -176,7 +175,7 @@ Copilot.SetInstructions(FailsafeInstructions, ActivationSequence);
 // Like InstructionSequences, InstructionGroups can be given conditions
 
 var InstructionSet = new InstructionGroup() {
-	// Only move into the READY stage is the interface is online
+	// Only move into the READY stage if the interface is online
 	new InstructionGroup(Conditions.CopilotStage("NOT READY")) {
 			new Instruction(
 			Conditions.InterfaceStatus(true),
@@ -186,7 +185,7 @@ var InstructionSet = new InstructionGroup() {
 	new InstructionGroup(Conditions.CopilotStage("READY")) {
 		// Reset ActivationTimer to 0 if it had any time on the clock
 		new Instruction(
-			new List<Condition>() {Conditions.FlightMode(FlightMode.OnGround), Conditions.TimerPassed("ActivationTimer", 0)},
+			Conditions.AllOf(Conditions.FlightMode(FlightMode.OnGround), Conditions.TimerPassed("ActivationTimer", 0)),
 			Actions.StopTimer("ActivationTimer"),
 			Actions.SetCopilotStage("ActivationTimer")),
 
@@ -197,7 +196,7 @@ var InstructionSet = new InstructionGroup() {
 
 		// Once the drone is in the air, in auto-mode, and not stopped, we enter the ON MISSION stage
 		new Instruction(
-			new List<Condition>() {Conditions.FlightMode(FlightMode.InAir), Conditions.AutoMode(true), Conditions.StoppedTimeAt(0)},
+			Conditions.AllOf(Conditions.FlightMode(FlightMode.InAir), Conditions.AutoMode(true), Conditions.StoppedTimeAt(0)),
 			Actions.SetCopilotStage("ON MISSION"))
 	},
 
@@ -214,9 +213,10 @@ var InstructionSet = new InstructionGroup() {
 
 		ActivationSequence
 	}
-}
+};
 
 Copilot.SetInstructions(FailsafeInstructions, InstructionSet);
+Copilot.SetDefaultCopilotStage("NOT READY");
 ```
 
 # Documentation
